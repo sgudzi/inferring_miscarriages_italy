@@ -47,44 +47,4 @@ save(
 
 
 
-#readRDS(paste0(dir.data, "/pop_female_08_22.RDS"))  %>% 
-#  filter(eta >= 16 &
-#           eta<46) %>% 
-#  mutate(age_group = 
-#           case_when(eta<25 ~ "<25",
-#                     eta>=25 &  eta< 35 ~ "25-35",
-#                     eta>=35 ~ "35+"
-#                     )) %>% 
-#  group_by(comres, ANNO, age_group) %>% 
-#  mutate(comres = str_pad(comres, width = 6, pad = "0")) %>% # add the two leading 0s to the codice coumnale
-#  summarise(pop = sum(pop), .groups = "drop") -> population
-#
-
-
-
-
-# Open and process denominator ------------------------------------------
-
-# 
-# readRDS(paste0(dir.data, "/pop_female_08_22.rds")) %>%
-#   filter(eta >= 16 & eta < 46) %>%
-#   mutate(
-#     age_group = case_when(
-#       eta < 25 ~ "pop<25",
-#       eta >= 25 & eta < 35 ~ "pop25-35",
-#       eta >= 35 ~ "pop35+"
-#     )#,
-#     #comres = str_pad(comres, width = 6, pad = "0")
-#   ) %>%
-#   group_by(ANNO, age_group, comres) %>%
-#   summarise(pop = sum(pop), .groups = "drop") %>%
-#   pivot_wider(
-#     names_from = age_group,
-#     values_from = pop,
-#     values_fill = 0
-#   ) %>%
-#   mutate(total_pop = `pop<25` + `pop25-35` + `pop35+`) -> population
-
-
-
 
