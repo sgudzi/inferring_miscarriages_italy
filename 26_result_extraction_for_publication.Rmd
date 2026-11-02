@@ -1,0 +1,1152 @@
+---
+title: "26_plots_for_publication"
+author: "Sandra Gudziunaite"
+date: "2026-06-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+modello_i <- "FinalMay/tmean_10_90_sincos"
+
+# --------------------------------------------------------------------------
+
+# create folder for results 
+
+results_path <- file.path(paste0("results/for_publication_2/", modello_i))
+dir_out_res_desc <-  file.path(paste0("results/descriptive/", modello_i))
+
+dir.create(results_path, recursive = T, showWarnings = F)
+dir.create(dir_out_res_desc, recursive = T, showWarnings = F)
+
+# --------------------------------------------------------------------------
+
+# Labels for ecoregions names
+
+label_name_eco_eng = c( # now cross checked with the whole thing 
+  "1A" = "Alpine Chain",
+  "1B" = "Po Valley",
+  "1C" = "Apennine Chain",
+  "2B" = "Tyrrhenian Coast and the Islands", 
+  "2C" = "Apulia and the Adriatic Coast"
+)
+
+
+label_name_eco_eng_facet = c( # now cross checked with the whole thing 
+  "1A" = "Alpine Chain",
+  "1B" = "Po Valley",
+  "1C" = "Apennine Chain",
+  "2B" = "Tyrrhenian Coast\nand the Islands", 
+  "2C" = "Apulia and the\nAdriatic Coast"
+)
+
+
+
+
+# Extract models 
+
+shapefile_comuni$Ecoregioni %>% unique()-> ecoregioni_names #EC is this correct?
+ecoregioni_names<- c("1B", "1A", "1C", "2B", "2C")
+
+overall_ris <- list()
+for (eco in ecoregioni_names) {
+  
+  overall_ris[[eco]] <- readRDS(
+    file = file.path(
+                     modello_i, #Replace here with whatever different result
+                     paste0("res_", eco, ".rds"))
+  )
+}
+
+```
+
+##Fixed effects
+
+### Extract linear effects of year (long-term time trend) and employment rate 
+
+Tables
+
+```{r}
+
+purrr::map(overall_ris, ~ .x$fixed["EMPL_RATE_20_64", ] %>% 
+             round(4)
+           ) %>% 
+  dplyr::bind_rows(.id = "eco") %>% 
+  mutate(
+    eco_code = eco,                        # <-- keep original code
+    eco      = label_name_eco_eng[eco]     # <-- recode to full label
+  ) %>% 
+  mutate(
+    `95% CrI` = paste0("(", `0.025quant`, " - ", `0.975quant`, ")")
+  ) %>% 
+  rename(Ecoregion = eco, 
+         RR = mean) %>% 
+  select(Ecoregion, RR, `95% CrI`) %>% 
+  remove_rownames() %>% 
+    knitr::kable(format = "latex", booktabs = TRUE)
+
+
+
+purrr::map(overall_ris, ~ .x$fixed["year_number", ] %>% 
+             round(4)
+           ) %>% 
+  dplyr::bind_rows(.id = "eco") %>% 
+  mutate(
+    eco_code = eco,                        # <-- keep original code
+    eco      = label_name_eco_eng[eco]     # <-- recode to full label
+  ) %>% 
+  mutate(
+    `95% CrI` = paste0("(", `0.025quant`, " - ", `0.975quant`, ")")
+  ) %>% 
+  rename(Ecoregion = eco, 
+         RR = mean) %>% 
+  select(Ecoregion, RR, `95% CrI`) %>% 
+  remove_rownames() %>% 
+    knitr::kable(format = "latex", booktabs = TRUE)
+
+
+```
+
+
+```{r}
+shapefile_comuni %>% 
+  group_by(Ecoregioni) %>% 
+  summarise(geometry = st_union(geometry)) %>% 
+  ggplot() +
+  geom_sf(color="red")
+
+```
+
+
+
+
+
+## Shapefile and ecological region partition
+For computational purposes, the analysis was stratified by 5 Ecological macro-regions. 
+
+```{r}
+
+shapefile_comuni %>% 
+  group_by(Ecoregioni) %>% 
+  summarise(geometry = st_union(geometry)) %>% 
+  ggplot() +
+  geom_sf(aes(fill = Ecoregioni)) +
+  labs(fill = "Ecological Region") +
+  theme_void() +
+  theme(
+    legend.text = element_text(size=14), 
+    legend.title = element_blank()) +
+  scale_fill_discrete(labels = label_name_eco_eng) -> map_ecoregions
+
+
+ggsave(plot = map_ecoregions, 
+       filename = paste0(results_path, "/map_ecoregions.png"), 
+       width = 8,
+       height = 4,
+       units = "in",
+       dpi = 300)
+  
+map_ecoregions
+
+```
+
+
+
+
+## Model specification
+
+
+ 
+```{r}
+knots_list <- lapply(names(overall_ris), function(nm) {
+  overall_ris[[nm]]$dlnm_tmax$var_knots
+})
+names(knots_list) <- names(overall_ris)
+
+
+knots_list %>%
+  enframe(name = "model", value = "var_knots") %>%
+  mutate(var_knots = lapply(var_knots, function(x) {
+    tibble(
+      knot_name = names(x),
+      var_knots = as.numeric(x)
+    )
+  })) %>%
+  unnest(var_knots) %>% 
+  mutate(var_knots = round(var_knots, 2)) %>%
+  pivot_wider(
+    names_from = knot_name,
+    values_from = var_knots
+) %>%
+    knitr::kable(format = "latex", booktabs = TRUE)
+
+
+```
+
+
+# Model outcome
+
+## Seasonal trend 
+
+
+```{r}
+bind_cols(lapply(overall_ris,
+                 function(m) m[["fixed"]]["sin_i", "mean"]*as.numeric(scale(sin((2*pi*1:53)/53))) + m[["fixed"]]["cos_i", "mean"]*as.numeric(scale(cos((2*pi*1:53)/53)))) %>% 
+            bind_rows() %>% 
+            mutate(week = 1:53) %>% 
+            pivot_longer(cols =all_of( ecoregioni_names), values_to = "RR"),
+          lapply(overall_ris,
+                 function(m) m[["fixed"]]["sin_i", "0.025quant"]*as.numeric(scale(sin((2*pi*1:53)/53))) + m[["fixed"]]["cos_i", "0.025quant"]*as.numeric(scale(cos((2*pi*1:53)/53)))) %>% 
+            bind_rows() %>% 
+            mutate(week = 1:53) %>% 
+            pivot_longer(cols =all_of( ecoregioni_names), values_to = "RR_u") %>% 
+            select(-c(week, name)),
+          lapply(overall_ris,
+                 function(m) m[["fixed"]]["sin_i", "0.975quant"]*as.numeric(scale(sin((2*pi*1:53)/53))) + m[["fixed"]]["cos_i", "0.975quant"]*as.numeric(scale(cos((2*pi*1:53)/53)))) %>% 
+            bind_rows() %>% 
+            mutate(week = 1:53) %>% 
+            pivot_longer(cols =all_of( ecoregioni_names), values_to = "RR_l")%>% 
+            select(-c(week, name))) %>% 
+  mutate(RR_exp = exp(RR), 
+         RR_l_exp = exp(RR_l),
+         RR_u_exp = exp(RR_u)) %>% 
+ggplot(aes(x = week,
+           y = RR_exp,
+           ymin = RR_l_exp,
+           ymax = RR_u_exp,
+           linetype =name)) +
+  geom_line() +
+  geom_ribbon(alpha = .2) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+    scale_x_continuous(breaks = 1 + seq(1, 53, by = (53/12)), 
+                     labels = str_month_names, 
+                     limits = c(1,53)) +
+  labs(x = "Month",
+       y = "RR (95% CrI)", 
+       fill = "Ecological Region") +
+    theme(
+#    axis.text.x.bottom =  element_text(size=16),
+    axis.title.x.bottom = element_text(size=16),
+    axis.title.y.left = element_text(size=16),
+    axis.text.y = element_text(size = 16),
+    axis.text.x = element_text(size = 16),
+    #strip.text = element_text(size = 14), 
+    legend.text = element_text(size = 18)
+  ) +
+  geom_hline(aes(yintercept = 1), linetype = "dashed")+
+  guides(fill = "none", 
+         linetype = guide_legend(nrow = 2, title = NULL)) +
+  scale_linetype_discrete(labels = label_name_eco_eng, name = "Ecological Region") -> seasonality
+
+seasonality
+
+ggsave(
+  filename = "seasonality.png",
+  path = results_path,
+  plot = seasonality,
+  width = 12,
+  height = 7,
+  dpi = 300
+  )
+
+seasonality
+
+```
+
+
+
+## Maps: Conception/birth rate 
+
+### Posterior probability that the RR is greater than one (P(RR)>1)
+```{r}
+
+bind_rows(shp_list) %>% 
+  mutate(RR = lapply(overall_ris,
+                     function(m) m$prob_gt1[1:(nrow(m$id_space)/2)]) %>% 
+           unlist()) %>% 
+   mutate(RR_cat = cut(RR,
+                      breaks = c(0, 0.25, 0.5, 0.75, 1),
+                      labels = c("<0.25", "0.25–0.5","0.5–0.75",  "0.75+"),
+                      right = FALSE)) %>% 
+  ggplot()+
+  geom_sf(aes(fill = RR_cat), color = NA)+
+  scale_fill_viridis_d(name = "P(RR)>1")+
+  theme_void() +
+  theme(
+  legend.text = element_text(size = 16),   
+  legend.title = element_text(size = 18),  
+  legend.position = "bottom"
+  )+
+  geom_sf(data = shapefile_comuni %>% 
+            group_by(COD_REG)%>% 
+            summarise(geometry = st_union(geometry)),
+          fill = NA, color = "red") -> plot_map_pp
+
+
+ggsave(
+  filename = "map_PP.png",
+  path = results_path,
+  plot = plot_map_pp,
+  width = 10,
+  height = 8,
+  dpi = 300)
+
+
+
+```
+
+### Relative Risk of birth relative to the national mean
+```{r}
+bind_rows(shp_list) %>% 
+  mutate(RR = lapply(overall_ris,
+                     function(m) exp(m[["id_space"]][["mean"]][1:(nrow(m$id_space)/2)])) %>% 
+           unlist()) %>% 
+  mutate(RR_cat = cut(RR,
+             breaks = c(-Inf, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, Inf),
+             labels = c("<0.25", "0.25–0.50", "0.50–0.75", "0.75–1.00", "1.00–1.25", "1.25–1.50", "1.50-1.75", "1.75+"),
+             right = FALSE)) %>% 
+  ggplot()+
+  geom_sf(aes(fill = RR_cat), color = NA)+
+  theme_void()+
+    theme(
+  legend.text = element_text(size = 16),   
+  legend.title = element_text(size = 18),  
+  legend.position = "bottom"
+  )+
+  scale_fill_viridis_d(name = "RR") -> plot_map_rr
+
+
+
+ggsave(
+  filename = "map_RR.png",
+  path = results_path,
+  plot = plot_map_rr,
+  width = 10,
+  height = 8,
+  dpi = 300)
+
+
+```
+
+
+# Model Results 
+
+## Effect of temperature on birth rates
+
+### Table: Overall effect of temperature over 3-22 GW on birth rates by decile of temperature and Ecoregion 
+```{r}
+
+purrr::map(
+  overall_ris,
+  ~ extract_overall_exposure_effect(
+    cp  = fn_make_cp(.x),
+    eco = .x$ecoregione
+  )) %>% bind_rows() %>%
+  group_by(eco) %>%
+  mutate(
+    perc_10 = quantile(temp, probs = 0.10, na.rm = TRUE),
+    perc_20 = quantile(temp, probs = 0.20, na.rm = TRUE),
+    perc_30 = quantile(temp, probs = 0.30, na.rm = TRUE),
+    perc_40 = quantile(temp, probs = 0.40, na.rm = TRUE),
+    perc_50 = quantile(temp, probs = 0.50, na.rm = TRUE),
+    perc_60 = quantile(temp, probs = 0.60, na.rm = TRUE),
+    perc_70 = quantile(temp, probs = 0.70, na.rm = TRUE),
+    perc_80 = quantile(temp, probs = 0.80, na.rm = TRUE),
+    perc_90 = quantile(temp, probs = 0.90, na.rm = TRUE)
+  ) %>%
+  pivot_longer(
+    cols      = starts_with("perc_"),
+    names_to  = "percentile",
+    values_to = "temp_at_perc"
+  ) %>%
+
+  filter(
+        temp == temp_at_perc) %>% 
+mutate(
+    RR    = round(RR, 4), 
+    RR_l  = round(RR_l, 4), 
+    RR_u  = round(RR_u, 4),
+    eco   = label_name_eco_eng[eco],
+    `95% CrI` = paste0("(", RR_l, " - ", RR_u, ")")
+  ) %>% 
+    mutate(percentile = as.integer(str_remove(percentile, "perc_"))) %>% 
+  arrange(eco) %>%
+  select(-c(RR_l, RR_u, temp_at_perc)) %>% 
+  rename(Temperature = temp,
+         Ecoregion = eco
+         ) %>% 
+  mutate(
+    Ecoregion = ifelse(duplicated(Ecoregion), "", Ecoregion)
+  ) %>% 
+  select(Ecoregion, percentile, Temperature, RR, `95% CrI`) %>%
+  knitr::kable(format = "latex", booktabs = TRUE)
+purrr::map(
+  overall_ris,
+  ~ extract_overall_exposure_effect(
+    cp  = fn_make_cp(.x),
+    eco = .x$ecoregione
+  )) %>% bind_rows() %>%
+  group_by(eco) %>%
+  mutate(
+    perc_10 = quantile(temp, probs = 0.10, na.rm = TRUE),
+    perc_20 = quantile(temp, probs = 0.20, na.rm = TRUE),
+    perc_30 = quantile(temp, probs = 0.30, na.rm = TRUE),
+    perc_40 = quantile(temp, probs = 0.40, na.rm = TRUE),
+    perc_50 = quantile(temp, probs = 0.50, na.rm = TRUE),
+    perc_60 = quantile(temp, probs = 0.60, na.rm = TRUE),
+    perc_70 = quantile(temp, probs = 0.70, na.rm = TRUE),
+    perc_80 = quantile(temp, probs = 0.80, na.rm = TRUE),
+    perc_90 = quantile(temp, probs = 0.90, na.rm = TRUE)
+  ) %>%
+  pivot_longer(
+    cols      = starts_with("perc_"),
+    names_to  = "percentile",
+    values_to = "temp_at_perc"
+  ) %>%
+
+  filter(
+        temp == temp_at_perc) %>% 
+mutate(
+    RR    = round(RR, 4), 
+    RR_l  = round(RR_l, 4), 
+    RR_u  = round(RR_u, 4),
+    eco   = label_name_eco_eng[eco],
+    `95% CrI` = paste0("(", RR_l, " - ", RR_u, ")")
+  ) %>% 
+    mutate(percentile = as.integer(str_remove(percentile, "perc_"))) %>% 
+  arrange(eco) %>%
+  select(-c(RR_l, RR_u, temp_at_perc)) %>% 
+  rename(Temperature = temp,
+         Ecoregion = eco
+         ) %>% 
+  mutate(
+    Ecoregion = ifelse(duplicated(Ecoregion), "", Ecoregion)
+  ) %>% 
+  select(Ecoregion, percentile, Temperature, RR, `95% CrI`) %>%
+  knitr::kable(format = "latex", booktabs = TRUE)
+
+
+
+
+```
+
+
+### Plot: Overall effect of temperature over 3-22 GW on birth rates across temperature range and Ecoregion 
+
+
+```{r}
+# Plot Overall effect marg against temperature during GW 0-22
+
+
+purrr::map(
+  overall_ris,
+  ~ extract_overall_exposure_effect(
+    cp  = fn_make_cp(.x),
+    eco = .x$ecoregione
+  )) %>% bind_rows()  %>%
+  ggplot(aes(x = temp,
+             y = RR,
+             group = eco
+             )) + 
+  geom_line(alpha = 0.8) + 
+  geom_ribbon(aes(ymin = RR_l,
+                  ymax = RR_u
+                  ),
+              alpha = 0.2,
+              colour = NA, 
+              show.legend = FALSE) +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  theme_minimal() + 
+    theme(legend.position = "none") +
+  labs(
+    x = "Temperature (°C)", 
+    y = "RR (95% CrI)") + 
+  guides(fill = "none") +
+  theme(
+    axis.title.x.bottom = element_text(size=16),
+    axis.title.y.left = element_text(size=16),
+
+    axis.text.x.bottom =  element_text(size = 17),
+    axis.text.y.left =  element_text(size = 17),
+    strip.text = element_text(size = 20)
+  ) +
+#  scale_x_continuous(
+#  labels = function(x) x + 2      # shifts every displayed label by +2
+#) + 
+
+ # scale_color_discrete(labels = label_name_eco_eng_pooled, name = "Ecological Region") +
+  facet_wrap(~eco, labeller= as_labeller(label_name_eco_eng_facet), nrow=1) -> img
+
+    
+
+      
+ggsave(
+  filename = paste0(results_path, "/overall_3_22_a.png"),
+  plot = img,
+  width = 20,
+  height = 7,
+  dpi = 300)
+
+img
+
+
+```
+
+
+
+### Plot: Effect of temperature on conception by GW, *heat* - 50 vs 90 percentile of Ecoregion-specific temperature distribution
+
+```{r}
+
+
+purrr::map(
+  overall_ris,
+  ~ extract_RR_by_temp_group(
+    cp  = fn_make_cp(.x),
+    eco = .x$ecoregione,
+    temp_at90perc = T,
+    cum = F,
+    start_gw = 1, 
+    end_gw = 19
+  )) %>% bind_rows() %>% 
+  ggplot(aes(x = lag, 
+             y = RR, 
+             group = eco)
+         ) + 
+  geom_line(alpha = 0.8) + 
+  geom_ribbon(aes(ymin = RR_l,
+                  ymax = RR_u#,
+                  #fill = factor(eco)
+                  ),
+              alpha = 0.2,
+              colour = NA, 
+              show.legend = FALSE) +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  theme_minimal() + 
+  theme(legend.position = "null")+
+  labs(
+    x = "Gestational Week", 
+    y = "RR (95% CrI)" 
+    ) + 
+  guides(fill = "none") +
+  theme(
+    axis.title.x.bottom = element_text(size=16),
+    axis.title.y.left = element_text(size=16),
+    axis.text.x.bottom =  element_text(size = 17),
+    axis.text.y.left =  element_text(size = 17),
+    strip.text = element_text(size = 20)
+  ) +
+  scale_x_continuous(
+  labels = function(x) x + 2      # shifts every displayed label by +2
+  ) + 
+
+  facet_wrap(~eco,
+           labeller = as_labeller(
+             label_name_eco_eng_facet,
+             default = label_wrap_gen(width = 20, multi_line = TRUE)
+           ),
+           nrow = 1) -> img
+
+
+ggsave(
+  filename = "gw_specific_90th_perc_temp_.png",
+  path = results_path,
+  plot = img,
+  width = 20,
+  height = 5,
+  dpi = 300)
+
+img
+
+
+```
+
+
+
+
+### Tables: Effect of temperature on conception by GW, *heat* - 50 vs 90 percentile - and *cold* - 50 vs 10 percentile -  of Ecoregion-specific temperature distribution 
+
+
+```{r}
+purrr::map(
+  overall_ris,
+  ~ extract_RR_by_temp_group(
+    cp  = fn_make_cp(.x),
+    eco = .x$ecoregione,
+    temp_at90perc = T,
+    cum = F,
+    start_gw = 1, 
+    end_gw = 19
+  )) %>% bind_rows() %>%
+  mutate(GW = lag+2) %>% 
+  mutate(
+    RR    = round(RR, 4), 
+    RR_l  = round(RR_l, 4), 
+    RR_u  = round(RR_u, 4),
+    eco   = label_name_eco_eng[eco],
+    `95% CrI` = paste0("(", RR_l, " - ", RR_u, ")")  # <-- combine here
+  ) %>% 
+  rename(Ecoregion = eco) %>% 
+  select(Ecoregion, GW, RR, `95% CrI`) %>% 
+      mutate(
+    Ecoregion = ifelse(duplicated(Ecoregion), "", Ecoregion)
+  ) %>% 
+  knitr::kable(format = "latex", booktabs = TRUE)
+
+
+purrr::map(
+  overall_ris,
+  ~ extract_RR_by_temp_group(
+    cp  = fn_make_cp(.x),
+    eco = .x$ecoregione,
+    temp_at10perc = T,
+    cum = F,
+    start_gw = 1, 
+    end_gw = 19
+  )) %>% bind_rows() %>%
+  mutate(GW = lag+2) %>% 
+  mutate(
+    RR    = round(RR, 4), 
+    RR_l  = round(RR_l, 4), 
+    RR_u  = round(RR_u, 4),
+    eco   = label_name_eco_eng[eco],
+    `95% CrI` = paste0("(", RR_l, " - ", RR_u, ")")  # <-- combine here
+  ) %>% 
+  rename(Ecoregion = eco) %>% 
+  select(Ecoregion, GW, RR, `95% CrI`) %>% 
+      mutate(
+    Ecoregion = ifelse(duplicated(Ecoregion), "", Ecoregion)
+  ) %>% remove_rownames() %>% 
+  knitr::kable(format = "latex", booktabs = TRUE)
+
+
+
+```
+
+
+
+### Plot: Effect of temperature on conception by GW, *cold* - 50 vs 10 percentile of temperature 
+
+```{r}
+
+
+purrr::map(
+  overall_ris,
+  ~ extract_RR_by_temp_group(
+    cp  = fn_make_cp(.x),
+    eco = .x$ecoregione,
+    temp_at10perc = T,
+    cum = F,
+    start_gw = 1, 
+    end_gw = 19
+  )) %>% bind_rows() %>% 
+  ggplot(aes(x = lag, 
+             y = RR, 
+             group = eco)
+         ) + 
+  geom_line(alpha = 0.8) + 
+  geom_ribbon(aes(ymin = RR_l,
+                  ymax = RR_u#,
+                  #fill = factor(eco)
+                  ),
+              alpha = 0.2,
+              colour = NA, 
+              show.legend = FALSE) +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  theme_minimal() + 
+  theme(legend.position = "null")+
+  labs(
+    x = "Gestational Week", 
+    y = "RR (95% CrI)" 
+    ) + 
+  guides(fill = "none") +
+  theme(
+    axis.title.x.bottom = element_text(size=16),
+    axis.title.y.left = element_text(size=16),
+    axis.text.x.bottom =  element_text(size = 17),
+    axis.text.y.left =  element_text(size = 17),
+    strip.text = element_text(size = 20)
+  ) +
+  scale_x_continuous(
+  labels = function(x) x + 2      # shifts every displayed label by +2
+  ) + 
+
+  facet_wrap(~eco,
+           labeller = as_labeller(
+             label_name_eco_eng_facet,
+             default = label_wrap_gen(width = 20, multi_line = TRUE)
+           ),
+           nrow = 1) -> img
+
+
+ggsave(
+  filename = "gw_specific_10th_perc_temp_.png",
+  path = results_path,
+  plot = img,
+  width = 20,
+  height = 5,
+  dpi = 300)
+
+img
+
+#+
+#  scale_fill_discrete(labels = label_name_eco_eng,  name = NULL)
+
+#  scale_color_hue(labels = label_name_eco_eng) +
+#  scale_fill_hue(labels = eco)
+
+
+```
+
+### Tables: Effect of temperature on conception by GW group (3-4, 5-9, 10-16, 17-22 )
+
+```{r}
+# % change (for graphical abstract)
+
+start_lag <- 1 
+end_lag   <- 5
+  
+purrr::map(
+    overall_ris,
+    ~ extract_RR_by_gw_group(
+      cp       = fn_make_cp(.x),
+      eco      = .x$ecoregione,
+      start_gw = start_lag,
+      end_gw   = end_lag
+    )
+  ) %>%
+    dplyr::bind_rows() %>%
+    dplyr::mutate(lag_window = paste0("Lag ", (start_lag+2), "-", (end_lag+2) )) %>%
+  dplyr::group_by(lag_window, eco) %>%
+        group_by(eco) %>%
+  mutate(
+    perc_10 = quantile(temp, probs = 0.10, na.rm = TRUE),
+ #   perc_20 = quantile(temp, probs = 0.20, na.rm = TRUE),
+ #   perc_30 = quantile(temp, probs = 0.30, na.rm = TRUE),
+ #   perc_40 = quantile(temp, probs = 0.40, na.rm = TRUE),
+ #   perc_50 = quantile(temp, probs = 0.50, na.rm = TRUE),
+ #   perc_60 = quantile(temp, probs = 0.60, na.rm = TRUE),
+ #   perc_70 = quantile(temp, probs = 0.70, na.rm = TRUE),
+ #   perc_80 = quantile(temp, probs = 0.80, na.rm = TRUE),
+ #   perc_90 = quantile(temp, probs = 0.90, na.rm = TRUE)
+  ) %>%
+  pivot_longer(
+    cols      = starts_with("perc_"),
+    names_to  = "percentile",
+    values_to = "temp_at_perc"
+  ) %>%
+  filter(temp == temp_at_perc) %>% 
+  mutate(
+    pct_change   = round((RR   - 1) * 100, 2),
+    pct_change_l = round((RR_l - 1) * 100, 2),
+    pct_change_u = round((RR_u - 1) * 100, 2),
+    eco          = label_name_eco_eng[eco],
+    `95% CrI`    = paste0("(", pct_change_l, "% - ", pct_change_u, "%)")
+  ) %>%
+  mutate(percentile = as.integer(str_remove(percentile, "perc_"))) %>% 
+  arrange(eco) %>%
+  rename(
+    Temperature    = temp,
+    Ecoregion      = eco,
+    `% Change`     = pct_change
+  ) %>% 
+  mutate(
+    Ecoregion = ifelse(duplicated(Ecoregion), "", Ecoregion)
+  ) %>%
+  select(-c(pct_change_l, pct_change_u)) %>% 
+  remove_rownames() %>% View()
+  select(Ecoregion, percentile, Temperature, `% Change`, `95% CrI`)
+
+
+```
+
+
+
+
+```{r}
+
+# RR
+start_lag <- 16 
+end_lag   <- 19
+  
+purrr::map(
+    overall_ris,
+    ~ extract_RR_by_gw_group(
+      cp       = fn_make_cp(.x),
+      eco      = .x$ecoregione,
+      start_gw = start_lag,
+      end_gw   = end_lag
+    )
+  ) %>%
+    dplyr::bind_rows() %>%
+    dplyr::mutate(lag_window = paste0("Lag ", (start_lag+2), "-", (end_lag+2) )) %>%
+  dplyr::group_by(lag_window, eco) %>%
+        group_by(eco) %>%
+  mutate(
+    perc_10 = quantile(temp, probs = 0.10, na.rm = TRUE),
+    perc_20 = quantile(temp, probs = 0.20, na.rm = TRUE),
+    perc_30 = quantile(temp, probs = 0.30, na.rm = TRUE),
+    perc_40 = quantile(temp, probs = 0.40, na.rm = TRUE),
+    perc_50 = quantile(temp, probs = 0.50, na.rm = TRUE),
+    perc_60 = quantile(temp, probs = 0.60, na.rm = TRUE),
+    perc_70 = quantile(temp, probs = 0.70, na.rm = TRUE),
+    perc_80 = quantile(temp, probs = 0.80, na.rm = TRUE),
+    perc_90 = quantile(temp, probs = 0.90, na.rm = TRUE)
+  ) %>%
+  pivot_longer(
+    cols      = starts_with("perc_"),
+    names_to  = "percentile",
+    values_to = "temp_at_perc"
+  ) %>%
+  filter(
+        temp == temp_at_perc) %>% 
+  mutate(
+    RR    = round(RR, 4), 
+    RR_l  = round(RR_l, 4), 
+    RR_u  = round(RR_u, 4),
+    eco   = label_name_eco_eng[eco],
+    `95% CrI` = paste0("(", RR_l, " - ", RR_u, ")")  # <-- combine here
+  ) %>% 
+    mutate(percentile = as.integer(str_remove(percentile, "perc_"))) %>% 
+  arrange(eco) %>%
+  rename(Temperature = temp,
+         Ecoregion = eco
+         ) %>% 
+          mutate(
+    Ecoregion = ifelse(duplicated(Ecoregion), "", Ecoregion)
+  ) %>% remove_rownames() %>% 
+  select(Ecoregion, percentile, Temperature, RR, `95% CrI`) %>%
+  knitr::kable(format = "latex", booktabs = TRUE)
+
+
+
+
+```
+
+
+
+### Figures: Effect of temperature on conception by GW group 
+
+
+```{r}
+
+lag_windows <- list(
+  c(1, 2),
+  c(3, 7),
+  c(8, 18),
+  c(8, 10),
+  c(11, 18)
+)
+
+
+
+for (lags in lag_windows) {
+  
+  start_lag <- lags[1]
+  end_lag   <- lags[2]
+  
+  
+  img <- purrr::map(
+    overall_ris,
+    ~ extract_RR_by_gw_group(
+      cp  = fn_make_cp(.x),
+      eco = .x$ecoregione, 
+      start_gw = start_lag, 
+      end_gw = end_lag
+    )
+  ) %>% 
+    dplyr::bind_rows() %>% 
+    
+    ggplot(aes(x = temp, 
+               y = RR,
+               group = eco )) + 
+    
+    geom_line(alpha = 0.8) + 
+    
+    geom_ribbon(aes(ymin = RR_l,
+                    ymax = RR_u#,
+#                    fill = factor(eco)
+                    ),
+                alpha = 0.2,
+                colour = NA) +
+    
+    geom_hline(yintercept = 1, linetype = "dashed") +
+    
+    theme_minimal() + 
+  theme(
+    axis.title.x.bottom = element_text(size=16),
+    axis.title.y.left = element_text(size=16),
+    axis.text.x.bottom =  element_text(size = 17),
+    axis.text.y.left =  element_text(size = 17),
+    strip.text = element_text(size = 20)
+  ) +
+
+    labs(
+    x = "Temperature (°C)", 
+    y = "RR (95% CrI)"#, 
+#      title = paste0("Overall exposure effect during GW ", start_lag, "-", end_lag)
+    ) + 
+    
+    guides(fill = "none") +
+    
+    facet_wrap(~eco, labeller = as_labeller(label_name_eco_eng_facet), nrow=1)
+  
+  ggsave(
+    filename = file.path(results_path, paste0("overall_lags_", (start_lag+2), "_", (end_lag+2), ".png")),
+    plot  = img,
+    width = 12,
+    height = 5,
+    dpi   = 300
+    )
+  img
+  
+  print(paste("Saving:", start_lag, end_lag, "in ", results_path))
+  
+}
+
+
+```
+
+
+
+
+
+
+### Table: Effect of exposure to high NO2 levels by gestational week
+
+
+```{r}
+
+purrr::map(
+  overall_ris,
+  ~ extract_RR_by_temp_group(
+    cp  = fn_make_cp_no2(.x, cen_at_min = T),
+    eco = .x$ecoregione,
+    cum = F,
+    start_gw = 1,
+    end_gw = 19,
+    no2_80perc =  T # effect of heat
+  )) %>% bind_rows() %>% 
+  mutate(GW = lag+2) %>% 
+  mutate(
+    RR    = round(RR, 4), 
+    RR_l  = round(RR_l, 4), 
+    RR_u  = round(RR_u, 4),
+    eco   = label_name_eco_eng[eco],
+    `95% CrI` = paste0("(", RR_l, " - ", RR_u, ")")  # <-- combine here
+  ) %>% 
+  rename(Ecoregion = eco) %>% 
+  select(Ecoregion, GW, RR, `95% CrI`) %>% 
+      mutate(
+    Ecoregion = ifelse(duplicated(Ecoregion), "", Ecoregion)
+  ) %>% 
+  remove_rownames() %>% 
+  knitr::kable(format = "latex", booktabs = TRUE)
+
+```
+
+
+
+
+### Figure: Effect of exposure to high NO2 levels by gestational week
+
+```{r}
+
+purrr::map(
+  overall_ris,
+  ~ extract_RR_by_temp_group(
+    cp  = fn_make_cp_no2(.x, cen_at_min = T),
+    eco = .x$ecoregione,
+    cum = F,
+    start_gw = 1,
+    end_gw = 19,
+    no2_80perc =  T # effect of heat
+  )) %>% bind_rows() %>% 
+  ggplot(aes(x = lag, 
+             y = RR,
+          #   colour = factor(eco),
+             group = eco, 
+             )) + 
+  geom_line(alpha = 0.8) + 
+  geom_ribbon(aes(ymin = RR_l,
+                 # fill = factor(eco),
+                  ymax = RR_u),
+              alpha = 0.2,
+              colour = NA) +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  theme_minimal() + 
+  theme(legend.position = "null")+
+  labs(
+    x = "Gestational Week", 
+    y = "RR (95% CrI)" 
+    ) + 
+  guides(fill = "none") +
+  theme(
+    axis.title.x.bottom = element_text(size=16),
+    axis.title.y.left = element_text(size=16),
+    axis.text.x.bottom =  element_text(size = 17),
+    axis.text.y.left =  element_text(size = 17),
+    strip.text = element_text(size = 20)
+  ) +
+  scale_x_continuous(
+  labels = function(x) x + 2      # shifts every displayed label by +2
+  ) + 
+
+  facet_wrap(~eco,
+           labeller = as_labeller(
+             label_name_eco_eng_facet,
+             default = label_wrap_gen(width = 20, multi_line = TRUE)
+           ),
+           nrow = 1) -> img
+  
+ggsave(
+    filename = paste0("lag_specifc_no2", ".png"),
+    path = results_path,
+    plot = img,
+    width = 12,
+    height = 5,
+    dpi = 300
+  )
+  
+
+
+
+```
+
+
+
+### Table: Effect of exposure to high NO2 levels by gestational week
+
+
+```{r}
+purrr::map(
+  overall_ris,
+  ~ extract_RR_by_temp_group(
+    cp  = fn_make_cp_no2(.x, cen_at_min = T),
+    eco = .x$ecoregione,
+    cum = F,
+    start_gw = 1,
+    end_gw = 19,
+    no2_80perc =  T # effect of heat
+  )) %>% bind_rows() %>% 
+  mutate(GW = lag+2) %>% 
+  mutate(
+    RR    = round(RR, 4), 
+    RR_l  = round(RR_l, 4), 
+    RR_u  = round(RR_u, 4),
+    eco   = label_name_eco_eng[eco],
+    `95% CrI` = paste0("(", RR_l, " - ", RR_u, ")")  # <-- combine here
+  ) %>% 
+  rename(Ecoregion = eco) %>% 
+  select(Ecoregion, GW, RR, `95% CrI`) %>% 
+      mutate(
+    Ecoregion = ifelse(duplicated(Ecoregion), "", Ecoregion)
+  ) %>% remove_rownames() %>% 
+  knitr::kable(format = "latex", booktabs = TRUE)
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+
+
+
+
+
+purrr::map(
+  overall_ris,
+  ~ extract_RR_by_temp_group(
+    cp  = fn_make_cp(.x),
+    eco = .x$ecoregione,
+    temp_at90perc = T,
+    cum = T,
+    start_gw = 1, 
+    end_gw = 19
+  )) %>% bind_rows() %>% 
+  
+  ggplot(aes(x = lag, 
+             y = RR, 
+             group = eco)
+         ) + 
+  geom_line(alpha = 0.8) + 
+  geom_ribbon(aes(ymin = RR_l,
+                  ymax = RR_u#,
+                  #fill = factor(eco)
+                  ),
+              alpha = 0.2,
+              colour = NA, 
+              show.legend = FALSE) +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  theme_minimal() + 
+  theme(legend.position = "null")+
+  labs(
+    x = "Gestational Week", 
+    y = "RR (95% CrI)" 
+    ) + 
+  guides(fill = "none") +
+  theme(
+    axis.title.x.bottom = element_text(size=16),
+    axis.title.y.left = element_text(size=16),
+    axis.text.x.bottom =  element_text(size = 17),
+    axis.text.y.left =  element_text(size = 17),
+    strip.text = element_text(size = 20)
+  ) +
+#  scale_x_continuous(
+#  labels = function(x) x + 2      # shifts every displayed label by +2
+#  ) + 
+
+  facet_wrap(~eco,
+           labeller = as_labeller(
+             label_name_eco_eng_facet,
+             default = label_wrap_gen(width = 20, multi_line = TRUE)
+           ),
+           nrow = 1) -> img
+
+
+ggsave(
+  filename = "additive_90th_perc_temp_.png",
+  path = results_path,
+  plot = img,
+  width = 20,
+  height = 5,
+  dpi = 300)
+
+img
+
+#+
+#  scale_fill_discrete(labels = label_name_eco_eng,  name = NULL)
+
+#  scale_color_hue(labels = label_name_eco_eng) +
+#  scale_fill_hue(labels = eco)
+
+
+
+```
+
+
+
+
+
