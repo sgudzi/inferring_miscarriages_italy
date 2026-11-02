@@ -1,3 +1,6 @@
+# Scripts for defining extraction functions for RR by percentile of temperature. 
+
+
 # define model and centring option 
 
 rm(list = ls())
@@ -8,10 +11,7 @@ gc()
 
 #modello_i <- "models_nb_tmax_NO2_cov_ntile_v2"
 
-
-
 #modello_i<- "models_nb_soloNO2_cov_ntile"
-#centering_boolean <- T # only used for naming purposes
 
 # --------------------------------------------------------------------------
 
@@ -42,29 +42,8 @@ label_name_eco_eng = c( # now cross checked with the whole thing
 )
 
 
-#shapefile_comuni %>% 
-#  group_by(Ecoregioni) %>% 
-#  summarise(geometry = st_union(geometry)) %>% 
-#  ggplot()+
-#  geom_sf(aes(fill = Ecoregioni))+
-#  theme_bw()+
-#  scale_fill_discrete(labels = label_name_eco_eng)-> mappa_ecoreg
-#
 
 shapefile_comuni$Ecoregioni %>% unique()-> ecoregioni_names #EC is this correct?
-#ecoregioni_names<- c("1B", "1A", "1C", "2B", "2C")
-#
-#overall_ris <- list()
-#for (eco in ecoregioni_names) {
-#  
-#  overall_ris[[eco]] <- readRDS(
-#    file = file.path("output",
-#                     "Final_5", #Replace here with whatever different result
-#                     paste0("res_", eco, ".rds"))
-#  )
-#}
-
-#View(overall_ris)
 
 
 # Risultati DLNM  ---------------------------------------------------------
@@ -960,144 +939,6 @@ ggsave(filename = paste0(results_path, "/","map_RR.png"),
        plot = p8)
 
 
-
-## Zero nb  ----------------------------------------------------------------
-#
-#
-#mod_zip = readRDS(
-#  file = file.path("output",
-#                   "models_zip",
-#                   paste0("res_", eco, ".rds")))
-#
-#rbind(fn_grafico_dlnm_tmax(mod_zip) %>% 
-#        mutate(mod = "ZNegBin"),
-#      fn_grafico_dlnm_tmax(overall_ris[["2C"]]) %>% 
-#        mutate(mod = "NegBin")) %>% 
-#  ggplot(aes(x = temp,
-#             y = RR,
-#             ymin = RR_l,
-#             ymax = RR_u))+
-#  geom_line()+
-#  geom_ribbon(alpha = .2, color = NA)+
-#  theme_minimal()+
-#  labs(x = "Daily maximum temperature (°C)") +
-#  geom_hline(aes(yintercept = 1), linetype = "dashed")+
-#  facet_wrap(vars(mod))
-#
-#
-#mod$summary.hyperpar
-#
-#
-#
-## --------------------------------------------------------------------------------------------
-## END FOR NOW --------------------------------------------------------------------------------
-## --------------------------------------------------------------------------------------------
-#
-#
-#
-#
-## extract the first derivative
-#
-#library(zoo)
-#
-#curve_slopes <- df_all_temp %>%
-#  arrange(eco, lag, temp) %>%
-#  group_by(eco, lag) %>%
-#  mutate(
-#    RR_smooth = rollmean(RR, 3, fill = NA, align = "center"),
-#    slope = (RR_smooth - lag(RR_smooth)) /
-#      (temp - lag(temp))
-#  ) %>%  filter(slope < 0) %>%
-#  slice_head(n = 1) # looks like after 10 weeks the most significant tirning point is heat
-#
-#
-#
-#
-#
-#
-#
-#
-## Define function for Arte moderna --------------------------------------------
-#
-#extract_surface <- function(cp, eco){
-#  
-#  df <- expand.grid(
-#    temp = cp$predvar,
-#    lag  = seq(cp$lag[1], cp$lag[2], 1)
-#  )
-#  
-#  df$RR  <- as.vector(exp(cp$matfit))
-#  df$RR_l <- as.vector(exp(cp$matlow))
-#  df$RR_u <- as.vector(exp(cp$mathigh))
-#  
-#  df$eco <- eco
-#  
-#  df
-#}
-#
-#
-
-
-plot.crosspred(cp,
-               "slices",
-               var   = c(p90),        # exposure value of interest
-               col   = c("steelblue"),
-               ylab  = "Relative Risk",
-               xlab  = "Lag (weeks)",
-               main  = "Lag-response at 90th percentile of Tmax"
-)
-
-p99 <- quantile(t_seq, 0.10, na.rm = TRUE)
-
-
-
-plot(cp,
-     "slices",
-     var   = p99,        # exposure value of interest
-     col   = "steelblue",
-     ylab  = "Relative Risk",
-     xlab  = "Lag (weeks)",
-     main  = "Lag-response at 90th percentile of Tmax"
-)
-
-
-
-plot(cp,
-     xlab  = "Tmax (°C)",
-     zlab  = "Relative Risk",
-     theta = 200,        # horizontal rotation angle
-     phi   = 30,         # vertical rotation angle
-     lphi  = 30,
-     main  = "3D exposure-lag-response surface"
-)
-
-plot(cp,
-     "contour",
-     xlab    = "Tmax (°C)",
-     ylab    = "Lag (weeks)",
-     key.title = title("RR"),
-     main    = "Exposure-lag-response contour"
-)
-
-
-lag_df <- data.frame(
-  lag    = cp$lag,
-  RR     = cp$matfit[p90, ],   # or use the numeric value
-  RR_low = cp$matlow[p90, ],
-  RR_high= cp$mathigh[p90, ]
-)
-
-ggplot(lag_df, aes(x = lag, y = RR)) +
-  geom_line(colour = "tomato", linewidth = 0.8) +
-  geom_ribbon(aes(ymin = RR_low, ymax = RR_high),
-              alpha = 0.2, fill = "tomato") +
-  geom_hline(yintercept = 1, linetype = "dashed", colour = "grey40") +
-  theme_minimal() +
-  labs(
-    x     = "Lag (weeks)",
-    y     = "Relative Risk",
-    title = "Lag-response at 90th percentile of Tmax"
-  )
 
 
 
