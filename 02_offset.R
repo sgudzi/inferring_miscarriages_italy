@@ -1,4 +1,5 @@
-# Open and process denominator
+# Open and process denominator/offset of female population of reproductive age;
+
 
 
 
